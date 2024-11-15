@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather and Flood Alerts</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        /* Basic styling to ensure map container and weather info section are displayed properly */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh; /* Full viewport height */
+            flex-direction: row;
+            overflow: hidden;
+        }
+
+        .weather-info {
+            width: 300px; /* Adjusted width for weather info */
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            position: relative;
+            z-index: 100;
+            overflow-y: auto;
+            flex-shrink: 0; /* Prevent shrinking */
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group input, .form-group button {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            margin-top: 5px;
+        }
+
+        .form-group button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        .form-group button:hover {
+            background-color: #45a049;
+        }
+
+        /* Ensure the map container is visible and takes the remaining space */
+        #map {
+            flex-grow: 1; /* Let the map take the remaining space */
+            height: 100vh;
+        }
+
+        /* Style for the result */
+        .result {
+            margin-top: 20px;
+        }
+
+        .alert {
+            color: red;
+        }
+
+        /* Additional tweaks to make the input fields more compact */
+        .form-group input, .form-group button {
+            font-size: 14px;
+            padding: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Weather Information -->
+        <div class="weather-info">
+            <h1>Weather and Flood Alerts</h1>
+            <div class="form-group">
+                <label for="city">City:</label>
+                <input type="text" id="city" placeholder="Enter city">
+            </div>
+            <div class="form-group">
+                <label for="zip_code">Zip Code:</label>
+                <input type="text" id="zip_code" placeholder="Enter zip code">
+            </div>
+            <div class="form-group">
+                <button id="getWeatherBtn">Get Weather and Alerts</button>
+            </div>
+
+            <div class="result" id="result" style="display: none;">
+                <h3>Weather Information:</h3>
+                <p><strong>City:</strong> <span id="cityName"></span></p>
+                <p><strong>Latitude:</strong> <span id="latitude"></span></p>
+                <p><strong>Longitude:</strong> <span id="longitude"></span></p>
+                <p><strong>Max Temperature:</strong> <span id="maxTemp"></span> °F</p>
+                <p><strong>Min Temperature:</strong> <span id="minTemp"></span> °F</p>
+                <p><strong>Precipitation:</strong> <span id="precipitation"></span> mm</p>
+
+                <h3>Flood Alerts:</h3>
+                <ul id="floodAlerts"></ul>
+            </div>
+
+            <div class="alert" id="errorAlert" style="display: none;"></div>
+        </div>
+
+        <!-- Map Container -->
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map centered on the world
+        const map = L.map('map').setView([0, 0], 2); // Center the world with zoom level 2
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        let locationMarker = null; // Store the marker for later removal
+
+        // Function to handle the weather and flood alert request
+        document.getElementById('getWeatherBtn').addEventListener('click', function() {
+            const city = document.getElementById('city').value;
+            const zipCode = document.getElementById('zip_code').value;
+
+            if (!city || !zipCode) {
+                alert('Please enter both city and zip code.');
+                return;
+            }
+
+            // Clear previous results and map marker
+            if (locationMarker) {
+                map.removeLayer(locationMarker); // Remove old marker
+            }
+
+            // Hide previous result and error
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('errorAlert').style.display = 'none';
+            document.getElementById('floodAlerts').innerHTML = '';
+
+            const requestData = { city, zip_code: zipCode };
+
+            // Fetch the weather data from the backend
+            fetch('/get_weather', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('errorAlert').style.display = 'block';
+                    document.getElementById('errorAlert').textContent = `Error: ${data.error}`;
+                } else {
+                    // Update the weather information
+                    document.getElementById('cityName').textContent = data.city;
+                    document.getElementById('latitude').textContent = data.latitude;
+                    document.getElementById('longitude').textContent = data.longitude;
+                    document.getElementById('maxTemp').textContent = data.weather.temperature_2m_max.map(temp => temp.toFixed(2)).join(', ');
+                    document.getElementById('minTemp').textContent = data.weather.temperature_2m_min.map(temp => temp.toFixed(2)).join(', ');
+                    document.getElementById('precipitation').textContent = data.weather.precipitation_sum.join(', ');
+
+                    // Display flood alerts
+                    if (data.flood_alerts.length > 0) {
+                        data.flood_alerts.forEach(alert => {
+                            const li = document.createElement('li');
+                            li.textContent = `Alert: ${alert.event}, Area: ${alert.areaDesc}`;
+                            document.getElementById('floodAlerts').appendChild(li);
+                        });
+                    } else {
+                        const li = document.createElement('li');
+                        li.textContent = 'No flood alerts in your area.';
+                        document.getElementById('floodAlerts').appendChild(li);
+                    }
+
+                    // Move map to the specified location and add a marker
+                    map.setView([data.latitude, data.longitude], 12); // Zoom in closer
+                    locationMarker = L.marker([data.latitude, data.longitude]).addTo(map)
+                        .bindPopup(`<b>${data.city}</b><br>Latitude: ${data.latitude}<br>Longitude: ${data.longitude}`)
+                        .openPopup();
+
+                    // Show the result
+                    document.getElementById('result').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                document.getElementById('errorAlert').style.display = 'block';
+                document.getElementById('errorAlert').textContent = 'An error occurred while fetching data.';
+            });
+        });
+    </script>
+
+</body>
+</html>
